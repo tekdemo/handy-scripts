@@ -1,0 +1,194 @@
+#!/bin/bash
+# VERSION 1.2
+#config=".${0##./}.conf"
+config=$PWD/.$(basename $0).conf
+
+function configure (){
+	read -p "Server name: " name
+	if [ ! $name ] ; then name=world; echo 'Setting default name of "world"';fi
+	
+	echo Specify the jarfile to run for a server mod. Leave blank for none
+	read -p ": " mod
+	
+	echo  "Enable autoupdate of the server?  " 
+	read -p "(true or false) : " autoupdate
+	echo "Limit server ram? Leave blank for no limit, or amount in ###M for megabytes." 
+	read -p ": " ram
+	echo "Enable the launcher to load the world from ramdisk."
+	echo "DO NOT enable this unless you schedule the backup function in crontab"
+	echo "Reccomended to set backup time to 10 to 15 minutes"
+	read -p "(true|false): " ramdisk
+
+	# More configurations to setup
+	#http://forums.bukkit.org/threads/gsps-and-cli-freaks.102/
+	
+	writeconfig
+	}
+
+function writeconfig (){
+	echo Writing config file $config ...
+	echo >$config
+	for var in name mod autoupdate ram ramdisk; do
+		echo $var=${!var} |tee -a $config
+	done
+	chmod +x $config
+	}
+
+function readconfig () {
+	. $config
+	}
+
+function update(){
+	if [ ! -f minecraft_server.jar ];then
+		echo "Server not found. Please check directory"
+		return 1
+	fi
+	REMOTE=$(curl --head -s  http://minecraft.net/download/minecraft_server.jar|grep Content-Length|cut -f2 -d" ")
+	echo Remote file: -$REMOTE-
+
+        LOCAL=$(du -b minecraft_server.jar|cut -f1)
+        echo  Local File:  -$LOCAL-
+	echo " ${REMOTE} ${LOCAL} "
+        if [ "$REMOTE" != "$LOCAL" ] ; then 
+		broadcast "Updating Server"
+                echo Downloading New Server 
+                wget  -q http://minecraft.net/download/minecraft_server.jar -O minecraft_server.jar
+		if [ isrunning ] ; then
+			restart 20 "Update installed. Please reconnect in 30 seconds, the server will now restart." 
+		fi
+		
+        fi
+
+	}
+
+function backup (){
+	broadcast "Backing up server..."
+	run save-off
+	run safe-all
+	sleep 5
+	rdiff-backup -v5 world/ world.backup
+	run save-on
+	broadcast "Backup Completed"
+	rdiff-backup -v5 --remove-older-than 10D world.backup
+	}
+
+function run (){
+	nl='
+'
+	echo "[CONSOLE][RUN] $*"
+	tmux -S $socket send-keys "$nl$*$nl"	
+	}
+function broadcast() {
+	echo "[CONSOLE]" "$*"
+	run say "$*"
+	}
+function start() {
+	if isrunning;then
+		echo "Server $name is currently running"
+	else
+		echo "Starting server $name"
+		tmux -S "$socket" new -d "/usr/bin/java -jar ${mod:-minecraft_server.jar} nogui"
+	fi
+	}
+function attach(){
+	tmux -S $socket attach
+	}
+function stop() {
+	if ! isrunning ;then 
+		echo "Server not running" 
+		return 1
+	fi;
+	if [ "$2" ] ; then 
+		broadcast "$@"
+	fi
+
+	broadcast "Server will shut down in ${1:-5} seconds"
+	echo Waiting for message broadcast to end....
+	sleep ${1:-5}
+	echo Server is shutting down
+	while isrunning; do
+		run stop;
+		sleep 2;
+	done;
+	status && rm $socket
+	}
+function restart {
+	if ! isrunning ;then 
+		echo Server Not running. Not starting
+		return
+	fi
+	stop ${1:-10} ${2:-"server is restarting. Please hold"}
+	echo Waiting for server to shut down
+	whileisrunning
+	start
+	}
+
+function ramdisk {
+	echo "loads the world into a ramdisk"
+	echo "Not yet implimented"
+	}
+
+function isrunning {
+	if [ -S $socket ];then 
+		echo "[DEBUG] Server running"
+		return 0
+	else
+		echo "[DEBUG] Server not running"
+		return 1
+	fi	
+	}
+
+function whileisrunning {
+	i=${1:-60}
+	while isrunning ;do
+		sleep 1;
+		if [ $i -le 0 ]; then 
+			echo Time up!
+			return 1
+		fi
+		i=$[i-1]
+		echo -n .
+	done
+	echo
+	}
+
+function status {
+	if isrunning; then
+		echo "$?: Server $name is running"
+	else
+		echo "$?: Server $name is inactive"
+	fi
+	cat $config
+	isrunning
+	return $?
+	}
+
+
+if [ ! -f $config ] && [ "$1" != "configure" ] ; then 
+	echo "Configuration file not found. Let's set one up"
+	configure ; 
+fi
+echo Reading configuration from $config
+readconfig
+
+for allowed in start stop restart backup broadcast run configure update status ramdisk attach; do
+
+	socket=$name.socket
+	if [ "$1" == $allowed ]; 
+		then $@ ;
+		exit
+	fi
+done
+echo 'Commands:
+start	: Start the server. If you pass true as well, will not launch in background
+stop	: 
+restart	: 
+backup	: 
+ramdisk	:
+broadcast : Broadcast a message to the server
+run	: Run a server command
+configure :  Run a setup wizard for the startup script
+update	: Update the server. Configure 
+status	: Print status of server
+'
+
