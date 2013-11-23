@@ -25,7 +25,8 @@ mineserver
 Ancient, probably no longer functioning script. Posted because it contains some of the performance tweaks I set up. 
 I had configured the server to run from a ramdisk, with a differential disk sync every 3 minutes. 
 The cool thing that this did is 
-A Gave a 10x performance boost, since Minecraft was heavily disk bound
-B made recovery from griefing or crashes very, very simple, and cheap (1000 "full" backups was only 5-10x the world size)
+
+1. Gave a 10x performance boost, since Minecraft was heavily disk bound
+2. made recovery from griefing or crashes very, very simple, and cheap (1000 "full" backups was only 5-10x the world size)
 
 Since these techniques are pretty universally cool, I thought I'd share.
